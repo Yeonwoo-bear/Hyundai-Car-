@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 서울 열린데이터 OpenAPI(openapi.seoul.go.kr:8088)는 HTTP만 제공하므로 해당 도메인에 한해서만 평문 통신을 허용한다. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">openapi.seoul.go.kr</domain>
+    </domain-config>
+</network-security-config>

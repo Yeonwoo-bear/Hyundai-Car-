@@ -1,0 +1,10 @@
+[
+  { "name": "세종로 공영주차장",       "lat": 37.5735, "lon": 126.9769, "totalSpaces": 1260, "currentParked": 980, "baseFee": 1000 },
+  { "name": "종묘 공영주차장",         "lat": 37.5717, "lon": 126.9945, "totalSpaces": 1400, "currentParked": 620, "baseFee": 1000 },
+  { "name": "서울역 서부 공영주차장",   "lat": 37.5556, "lon": 126.9690, "totalSpaces": 320,  "currentParked": 301, "baseFee": 800 },
+  { "name": "남산 공영주차장",         "lat": 37.5551, "lon": 126.9853, "totalSpaces": 150,  "currentParked": 45,  "baseFee": 600 },
+  { "name": "동대문 공영주차장",       "lat": 37.5671, "lon": 127.0092, "totalSpaces": 480,  "currentParked": 400, "baseFee": 700 },
+  { "name": "여의도 한강 공영주차장",   "lat": 37.5286, "lon": 126.9330, "totalSpaces": 900,  "currentParked": 310, "baseFee": 500 },
+  { "name": "강남역 공영주차장",       "lat": 37.4979, "lon": 127.0276, "totalSpaces": 210,  "currentParked": 198, "baseFee": 1500 },
+  { "name": "잠실 종합운동장 주차장",   "lat": 37.5152, "lon": 127.0729, "totalSpaces": 1800, "currentParked": 700, "baseFee": 400 }
+]
