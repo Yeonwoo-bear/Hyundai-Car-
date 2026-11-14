@@ -5,6 +5,7 @@ import android.util.Log
 import com.way.app.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.net.HttpURLConnection
@@ -12,9 +13,13 @@ import java.net.URL
 import java.net.URLEncoder
 
 /**
- * 서울 열린데이터 광장 GetParkingInfo(시영주차장 실시간 주차대수) 조회.
- * 키가 없거나 호출/파싱이 실패하면 assets/parking_sample.json 으로 폴백한다.
+ * 서울 열린데이터 GetParkingInfo(실시간 주차대수) 조회.
  *
+ * GetParkingInfo 응답에는 좌표가 없으므로, GetParkInfo에서 미리 추출한
+ * assets/parking_coords.json(PKLT_CD -> lat/lon, tools/build_parking_coords.py로 생성)과
+ * PKLT_CD로 조인해 좌표를 채운다. 좌표가 매칭되지 않는 항목은 제외한다.
+ *
+ * 키 미설정 / 호출 실패 / 조인 결과 0건이면 assets/parking_sample.json 으로 폴백한다.
  * 주의: 인증키가 들어간 URL은 절대 로그에 남기지 않는다.
  */
 class ParkingRepository(
@@ -27,18 +32,37 @@ class ParkingRepository(
 
     data class Result(val lots: List<ParkingLot>, val source: Source)
 
+    /** GetParkingInfo 한 행(좌표 없음). */
+    data class RealtimeRow(
+        val code: String,
+        val name: String,
+        val totalSpaces: Int,
+        val currentParked: Int,
+        val baseFee: Int
+    )
+
+    data class Coord(val lat: Double, val lon: Double)
+
+    data class Page(val totalCount: Int, val rows: List<RealtimeRow>)
+
+    private val coords: Map<String, Coord> by lazy {
+        appContext.assets.open(COORDS_FILE).bufferedReader(Charsets.UTF_8).use { parseCoords(it.readText()) }
+    }
+
     suspend fun load(): Result = withContext(Dispatchers.IO) {
         if (apiKey.isBlank()) {
             Log.w(TAG, "SEOUL_API_KEY 미설정 → 샘플 데이터 사용")
             return@withContext sample()
         }
         try {
-            val lots = fetchAll()
-            if (lots.isEmpty()) {
-                Log.w(TAG, "API 응답에 사용 가능한 주차장 없음 → 샘플 데이터 사용")
+            val realtime = fetchAll()
+            val joined = join(realtime, coords)
+            Log.i(TAG, "realtime=${realtime.size}, joined=${joined.size}")
+            if (joined.isEmpty()) {
+                Log.w(TAG, "좌표 조인 결과 0건 → 샘플 데이터 사용")
                 sample()
             } else {
-                Result(lots, Source.API)
+                Result(joined, Source.API)
             }
         } catch (e: Exception) {
             // e.message 에 URL(=키)이 포함될 수 있으므로 예외 종류만 기록한다.
@@ -49,8 +73,8 @@ class ParkingRepository(
 
     private fun sample() = Result(SampleParkingSource.load(appContext), Source.SAMPLE)
 
-    private fun fetchAll(): List<ParkingLot> {
-        val all = mutableListOf<ParkingLot>()
+    private fun fetchAll(): List<RealtimeRow> {
+        val all = mutableListOf<RealtimeRow>()
         var start = 1
         var total = Int.MAX_VALUE
         var pages = 0
@@ -58,11 +82,11 @@ class ParkingRepository(
             val end = start + PAGE_SIZE - 1
             val page = parseResponse(get(start, end))
             total = page.totalCount
-            all += page.lots
+            all += page.rows
             start = end + 1
             pages++
         }
-        return all.distinctBy { it.name }
+        return all.distinctBy { it.code }
     }
 
     private fun get(start: Int, end: Int): String {
@@ -81,19 +105,17 @@ class ParkingRepository(
         }
     }
 
-    data class Page(val totalCount: Int, val lots: List<ParkingLot>)
-
     companion object {
         private const val TAG = "ParkingRepository"
+        private const val COORDS_FILE = "parking_coords.json"
         private const val PAGE_SIZE = 1000   // API 1회 최대 1000건
         private const val MAX_PAGES = 3
         private const val TIMEOUT_MS = 5_000
 
         /**
-         * GetParkingInfo JSON 파싱 (순수 함수, 단위 테스트 대상).
+         * GetParkingInfo JSON 파싱 (순수 함수).
          * - RESULT.CODE 가 INFO-000 이 아니면 예외
-         * - 좌표가 서울 범위 밖이거나 총면수 0 인 행 제외
-         * - 실시간 연계(PRK_STTS_YN=1) 가 아닌 행은 현재 대수를 신뢰할 수 없어 제외
+         * - 실시간 연계(PRK_STTS_YN=1)가 아니거나, PKLT_CD/이름이 없거나, 총면수 0 이하인 행 제외
          */
         fun parseResponse(json: String): Page {
             val root = JSONObject(json)
@@ -102,26 +124,52 @@ class ParkingRepository(
             val resultCode = body.optJSONObject("RESULT")?.optString("CODE").orEmpty()
             if (resultCode != "INFO-000") throw IOException("API error $resultCode")
 
-            val rows = body.optJSONArray("row") ?: return Page(0, emptyList())
-            val lots = (0 until rows.length()).mapNotNull { i ->
-                val r = rows.getJSONObject(i)
-                val realtime = r.optString("PRK_STTS_YN", "1")
-                if (realtime.isNotEmpty() && realtime != "1") return@mapNotNull null
-                val lat = r.optString("LAT").toDoubleOrNull() ?: return@mapNotNull null
-                val lon = r.optString("LOT").toDoubleOrNull() ?: return@mapNotNull null
-                if (lat !in 37.4..37.75 || lon !in 126.7..127.3) return@mapNotNull null
+            val arr = body.optJSONArray("row") ?: return Page(0, emptyList())
+            val rows = (0 until arr.length()).mapNotNull { i ->
+                val r = arr.getJSONObject(i)
+                if (r.optString("PRK_STTS_YN") != "1") return@mapNotNull null
+                val code = r.optString("PKLT_CD").trim().ifEmpty { return@mapNotNull null }
+                val name = r.optString("PKLT_NM").trim().ifEmpty { return@mapNotNull null }
                 val total = r.optString("TPKCT").toDoubleOrNull()?.toInt() ?: 0
                 if (total <= 0) return@mapNotNull null
-                ParkingLot(
-                    name = r.optString("PKLT_NM").ifBlank { return@mapNotNull null },
-                    lat = lat,
-                    lon = lon,
+                RealtimeRow(
+                    code = code,
+                    name = name,
                     totalSpaces = total,
                     currentParked = r.optString("NOW_PRK_VHCL_CNT").toDoubleOrNull()?.toInt() ?: 0,
                     baseFee = r.optString("BSC_PRK_CRG").toDoubleOrNull()?.toInt() ?: 0
                 )
             }
-            return Page(body.optInt("list_total_count", lots.size), lots)
+            return Page(body.optInt("list_total_count", rows.size), rows)
         }
+
+        /** parking_coords.json 파싱: [{"PKLT_CD","lat","lon"}] -> 맵. 유효하지 않은 항목은 건너뛴다. */
+        fun parseCoords(json: String): Map<String, Coord> {
+            val arr = JSONArray(json)
+            val map = HashMap<String, Coord>(arr.length())
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                val code = o.optString("PKLT_CD").trim()
+                val lat = o.optDouble("lat")
+                val lon = o.optDouble("lon")
+                if (code.isEmpty() || lat.isNaN() || lon.isNaN() || lat == 0.0 || lon == 0.0) continue
+                map.putIfAbsent(code, Coord(lat, lon))
+            }
+            return map
+        }
+
+        /** 실시간 행과 좌표를 PKLT_CD로 조인. 좌표가 없는 행은 제외. */
+        fun join(rows: List<RealtimeRow>, coords: Map<String, Coord>): List<ParkingLot> =
+            rows.mapNotNull { r ->
+                val c = coords[r.code] ?: return@mapNotNull null
+                ParkingLot(
+                    name = r.name,
+                    lat = c.lat,
+                    lon = c.lon,
+                    totalSpaces = r.totalSpaces,
+                    currentParked = r.currentParked,
+                    baseFee = r.baseFee
+                )
+            }
     }
 }
