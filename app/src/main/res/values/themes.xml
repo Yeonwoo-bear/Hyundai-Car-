@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-
-    <style name="Theme.WAY" parent="android:Theme.Material.Light.NoActionBar" />
+    <!-- 차량 화면은 항상 다크: 앱 시작 시 흰 화면 깜빡임 방지 -->
+    <style name="Theme.WAY" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/way_background</item>
+        <item name="android:statusBarColor">@color/way_background</item>
+        <item name="android:navigationBarColor">@color/way_background</item>
+    </style>
 </resources>
