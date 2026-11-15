@@ -14,36 +14,40 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.way.app.fit.ParkingRecommender
 import com.way.app.fit.Recommendation
+import com.way.app.ui.components.Badge
+import com.way.app.ui.components.PillChip
+import com.way.app.ui.components.SampleBadge
+import com.way.app.ui.components.ScreenHeader
+import com.way.app.ui.theme.WAYTheme
+import com.way.app.ui.theme.WayColors
+import com.way.app.ui.theme.WayShapes
+import com.way.app.ui.theme.WaySpacing
+import java.text.NumberFormat
+import java.util.Locale
 import kotlin.math.roundToInt
-
-/** 차량용 고대비 팔레트 (야간/주간 모두 어두운 배경 고정). */
-private object DriveColors {
-    val Background = Color(0xFF0E1116)
-    val Card = Color(0xFF1B2028)
-    val CardBest = Color(0xFF12324F)
-    val Accent = Color(0xFF4FC3F7)
-    val Text = Color(0xFFFFFFFF)
-    val SubText = Color(0xFFB8C2CC)
-    val Good = Color(0xFF66BB6A)
-    val Warn = Color(0xFFFFB74D)
-    val Bad = Color(0xFFEF5350)
-}
 
 sealed interface StopFitUiState {
     data object Loading : StopFitUiState
@@ -51,125 +55,132 @@ sealed interface StopFitUiState {
     data class Empty(val message: String) : StopFitUiState
 }
 
+/** 화면에서만 바꾸는 정렬 (추천 점수 자체는 ParkingRecommender 결과 그대로). */
+private enum class FitSort(val label: String) { RECOMMENDED("추천순"), NEAREST("가까운순"), CHEAPEST("저렴한순") }
+
 /**
- * 운전 중 보기 쉬운 주차장 추천 화면.
- *  - 후보는 최대 3개, 1위는 강조
- *  - 카드 전체가 하나의 큰 터치 영역 (탭 = 선택)
- *  - 읽어야 할 정보는 이름 / 이유 / 여유율 세 가지만
+ * (4) 주차 장소 추천 — 시안의 카드 스타일.
+ * 카드: 순위 / 이름(+추천 배지) / 거리·기본요금 / 혼잡도 색 / 카드 전체 탭 = 선택
  */
 @Composable
 fun StopFitScreen(
     state: StopFitUiState,
     onSelect: (Recommendation) -> Unit,
     onRefresh: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onBack: (() -> Unit)? = null
 ) {
+    var sort by rememberSaveable { mutableStateOf(FitSort.RECOMMENDED) }
     Column(
-        modifier = modifier
+        modifier
             .fillMaxSize()
-            .background(DriveColors.Background)
-            .padding(horizontal = 24.dp, vertical = 20.dp)
+            .background(WayColors.Background)
+            .verticalScroll(rememberScrollState())
+            .padding(WaySpacing.Screen),
+        verticalArrangement = Arrangement.spacedBy(WaySpacing.Gap)
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "주차장 추천",
-                color = DriveColors.Text,
-                fontSize = 34.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.weight(1f)
-            )
-            BigButton(text = "새로고침", onClick = onRefresh)
+        ScreenHeader(title = "주차장 추천", label = "STOP FIT", onBack = onBack) {
+            if (state is StopFitUiState.Ready && state.fromSample) { SampleBadge(); Spacer(Modifier.width(12.dp)) }
+            Box(
+                Modifier.size(56.dp).clickable(role = Role.Button, onClick = onRefresh),
+                contentAlignment = Alignment.Center
+            ) { Icon(Icons.Outlined.Refresh, "새로고침", tint = WayColors.SubText, modifier = Modifier.size(30.dp)) }
         }
-        if (state is StopFitUiState.Ready && state.fromSample) {
-            Text("샘플 데이터 표시 중", color = DriveColors.Warn, fontSize = 18.sp)
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            FitSort.entries.forEach { s -> PillChip(s.label, sort == s, { sort = s }) }
         }
-        Spacer(Modifier.size(16.dp))
 
         when (state) {
-            StopFitUiState.Loading -> CenterBox {
-                CircularProgressIndicator(color = DriveColors.Accent, modifier = Modifier.size(64.dp))
+            StopFitUiState.Loading -> Box(Modifier.fillMaxWidth().heightIn(min = 300.dp), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = WayColors.Primary, modifier = Modifier.size(64.dp))
             }
-            is StopFitUiState.Empty -> CenterBox {
-                Text(state.message, color = DriveColors.SubText, fontSize = 26.sp)
+            is StopFitUiState.Empty -> Box(Modifier.fillMaxWidth().heightIn(min = 300.dp), contentAlignment = Alignment.Center) {
+                Text(state.message, style = MaterialTheme.typography.headlineSmall, color = WayColors.SubText)
             }
-            is StopFitUiState.Ready -> Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                state.items.take(3).forEachIndexed { index, rec ->
-                    RecommendationCard(rank = index + 1, rec = rec, onClick = { onSelect(rec) })
+            is StopFitUiState.Ready -> {
+                val top = state.items.take(3)
+                val sorted = when (sort) {
+                    FitSort.RECOMMENDED -> top
+                    FitSort.NEAREST -> top.sortedBy { it.distanceMeters }
+                    FitSort.CHEAPEST -> top.sortedBy { it.baseFee }
+                }
+                sorted.forEachIndexed { index, rec ->
+                    ParkingCard(
+                        rank = index + 1,
+                        rec = rec,
+                        recommended = rec == top.first(),
+                        onClick = { onSelect(rec) }
+                    )
+                }
+                if (state.fromSample) {
+                    Text(
+                        "※ 실시간 API에 연결되지 않아 샘플 주차장 데이터를 보여주고 있어요.",
+                        style = MaterialTheme.typography.bodySmall, color = WayColors.Muted
+                    )
                 }
             }
         }
     }
 }
 
+private data class Congestion(val label: String, val color: Color)
+
+private fun congestionOf(rate: Double) = when {
+    rate >= 0.3 -> Congestion("여유", WayColors.Good)
+    rate >= 0.1 -> Congestion("보통", WayColors.Warn)
+    else -> Congestion("혼잡", WayColors.Bad)
+}
+
+private val won = NumberFormat.getNumberInstance(Locale.KOREA)
+
 @Composable
-private fun RecommendationCard(rank: Int, rec: Recommendation, onClick: () -> Unit) {
-    val best = rank == 1
-    val shape = RoundedCornerShape(20.dp)
+private fun ParkingCard(rank: Int, rec: Recommendation, recommended: Boolean, onClick: () -> Unit) {
+    val c = congestionOf(rec.vacancyRate)
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = if (best) 132.dp else 104.dp)
-            .background(if (best) DriveColors.CardBest else DriveColors.Card, shape)
-            .then(if (best) Modifier.border(3.dp, DriveColors.Accent, shape) else Modifier)
+            .heightIn(min = 120.dp)
+            .background(WayColors.Surface, WayShapes.Card)
+            .then(if (rank == 1) Modifier.border(2.dp, WayColors.Primary, WayShapes.Card) else Modifier)
             .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = 20.dp, vertical = 16.dp)
+            .padding(horizontal = 24.dp, vertical = 18.dp)
     ) {
+        // 순위
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier
-                .size(if (best) 60.dp else 52.dp)
-                .background(if (best) DriveColors.Accent else DriveColors.SubText, CircleShape)
+                .size(60.dp)
+                .background(if (rank == 1) WayColors.Primary else WayColors.SurfaceHigh, CircleShape)
         ) {
-            Text("$rank", color = DriveColors.Background, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+            Text("$rank", style = MaterialTheme.typography.headlineSmall, color = WayColors.Text)
         }
-        Spacer(Modifier.width(20.dp))
-        Column(Modifier.weight(1f)) {
+        Spacer(Modifier.width(22.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    rec.name, style = MaterialTheme.typography.headlineSmall, color = WayColors.Text,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false)
+                )
+                if (recommended) { Spacer(Modifier.width(12.dp)); Badge("추천", WayColors.Primary) }
+            }
             Text(
-                rec.name,
-                color = DriveColors.Text,
-                fontSize = if (best) 32.sp else 28.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                buildString {
+                    append(ParkingRecommender.formatDistance(rec.distanceMeters))
+                    append(" · 기본 ")
+                    append(if (rec.baseFee <= 0) "무료" else "${won.format(rec.baseFee)}원")
+                },
+                style = MaterialTheme.typography.bodyLarge, color = WayColors.SubText
             )
-            Text(rec.reason, color = DriveColors.SubText, fontSize = 22.sp, maxLines = 1)
+            Text(rec.reason, style = MaterialTheme.typography.bodyMedium, color = WayColors.Muted, maxLines = 1,
+                overflow = TextOverflow.Ellipsis)
         }
-        Spacer(Modifier.width(12.dp))
-        VacancyBadge(rec.vacancyRate)
+        Spacer(Modifier.width(16.dp))
+        Column(horizontalAlignment = Alignment.End) {
+            Text(c.label, style = MaterialTheme.typography.headlineSmall, color = c.color)
+            Text("빈 자리 ${(rec.vacancyRate * 100).roundToInt()}%", style = MaterialTheme.typography.bodyMedium, color = c.color)
+        }
     }
-}
-
-@Composable
-private fun VacancyBadge(rate: Double) {
-    val color = when {
-        rate >= 0.3 -> DriveColors.Good
-        rate >= 0.1 -> DriveColors.Warn
-        else -> DriveColors.Bad
-    }
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("${(rate * 100).roundToInt()}%", color = color, fontSize = 34.sp, fontWeight = FontWeight.Bold)
-        Text("여유", color = DriveColors.SubText, fontSize = 18.sp)
-    }
-}
-
-@Composable
-private fun BigButton(text: String, onClick: () -> Unit) {
-    Box(
-        contentAlignment = Alignment.Center,
-        modifier = Modifier
-            .heightIn(min = 64.dp)
-            .background(DriveColors.Card, RoundedCornerShape(16.dp))
-            .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = 24.dp)
-    ) {
-        Text(text, color = DriveColors.Accent, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-    }
-}
-
-@Composable
-private fun CenterBox(content: @Composable () -> Unit) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { content() }
 }
 
 @Preview(widthDp = 1280, heightDp = 720)
@@ -180,5 +191,5 @@ private fun StopFitScreenPreview() {
         Recommendation("세종로 공영주차장", 37.57, 126.97, 0.71, "가까워요 · ${ParkingRecommender.formatDistance(650.0)}", 650.0, 0.22, 1000),
         Recommendation("서울역 서부 공영주차장", 37.55, 126.96, 0.55, "저렴해요 · 기본 800원", 2100.0, 0.06, 800)
     )
-    StopFitScreen(StopFitUiState.Ready(items, fromSample = true), onSelect = {}, onRefresh = {})
+    WAYTheme { StopFitScreen(StopFitUiState.Ready(items, fromSample = true), onSelect = {}, onRefresh = {}) }
 }
